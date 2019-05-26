@@ -242,18 +242,7 @@ namespace Triangulation
 
         private void button1_Click(object sender, EventArgs e)
         {
-            if (imageBits == null)
-                return;
 
-            gg();
-
-            if(MessageBox.Show("Allign?", "ХМЪ", MessageBoxButtons.YesNo, MessageBoxIcon.Asterisk) != DialogResult.Yes)
-                return;
-
-            cluster();
-            MainImage.Invalidate();
-
-            gg();
         }
 
         void cluster()
