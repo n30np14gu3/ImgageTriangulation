@@ -4,6 +4,13 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Linq;
 using System.Windows.Forms;
+using System.Windows.Forms.DataVisualization.Charting;
+using Accord.Imaging.Converters;
+using Accord.MachineLearning;
+using Accord.Math;
+using Accord.Math.Distances;
+using Accord.Statistics.Distributions.Fitting;
+using Accord.Statistics.Distributions.Univariate;
 using AForge.Imaging;
 using TriangleNet;
 using TriangleNet.Geometry;
@@ -12,10 +19,12 @@ using Image = System.Drawing.Image;
 
 namespace Triangulation
 {
-    public partial class Form1 : Form
+    public partial class MainForm : Form
     {
         private Mesh triangulated = null;
-        public Form1()
+        private byte[,,] imageBits = null;
+        private Bitmap realImage = null;
+        public MainForm()
         {
             InitializeComponent();
         }
@@ -29,6 +38,8 @@ namespace Triangulation
             try
             {
                 MainImage.Image = Image.FromFile(OpenImg.FileName);
+                realImage = (Bitmap) MainImage.Image;
+                imageBits = BitmapToByteRgbQ((Bitmap)MainImage.Image);
             }
             catch
             {
@@ -56,10 +67,8 @@ namespace Triangulation
         private void triangulateToolStripMenuItem_Click(object sender, EventArgs e)
         {
 
-            if(MainImage.Image == null)
+            if (MainImage.Image == null)
                 return;
-
-            byte[,,] imageBits = BitmapToByteRgbQ((Bitmap)MainImage.Image);
 
             Polygon p = new Polygon();
 
@@ -209,7 +218,7 @@ namespace Triangulation
 
         private void drawPolygonsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if(triangulated == null)
+            if (triangulated == null)
                 return;
 
             using (Graphics graphics = Graphics.FromImage(MainImage.Image))
@@ -229,6 +238,80 @@ namespace Triangulation
                 }
             }
             MainImage.Invalidate();
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            if (imageBits == null)
+                return;
+
+            gg();
+
+            if(MessageBox.Show("Allign?", "ХМЪ", MessageBoxButtons.YesNo, MessageBoxIcon.Asterisk) != DialogResult.Yes)
+                return;
+
+            cluster();
+            MainImage.Invalidate();
+
+            gg();
+        }
+
+        void cluster()
+        {
+            int _k = (int)PartCount.Value;
+
+            Bitmap image = realImage;
+
+            ImageToArray imageToArray = new ImageToArray(min: -1, max: +1);
+            ArrayToImage arrayToImage = new ArrayToImage(image.Width, image.Height, min: -1, max: +1);
+
+            double[][] pixels; imageToArray.Convert(image, out pixels);
+
+            KMeans kmeans = new KMeans(_k, new SquareEuclidean())
+            {
+                Tolerance = 0.05
+            };
+
+            int[] idx = kmeans.Learn(pixels).Decide(pixels);
+
+            pixels.Apply((x, i) => kmeans.Clusters.Centroids[idx[i]], result: pixels);
+
+            Bitmap result; arrayToImage.Convert(pixels, out result);
+
+            MainImage.Image = result;
+
+        }
+        void gg()
+        {
+            int parts = 255 / (int)PartCount.Value;
+            List<int> bright = new List<int>();
+            int allCount = 0;
+            bright.AddRange(new int[(int)PartCount.Value]);
+            for (int i = 0; i < imageBits.GetLength(2); i++)
+            for (int j = 0; j < imageBits.GetLength(1); j++)
+            {
+                int b = (imageBits[0, j, i] + imageBits[1, j, i] + imageBits[2, j, i]) / 3;
+                for (int k = 1; k <= (int)PartCount.Value; k++)
+                {
+                    if (b <= k * parts)
+                    {
+                        bright[k - 1]++;
+                        allCount++;
+                        break;
+                    }
+                }
+            }
+            MainChart.Series.Clear();
+            Series s = new Series()
+            {
+                ChartType = SeriesChartType.Column
+            };
+            for (int i = 0; i < bright.Count; i++)
+            {
+                s.Points.AddXY((i + 1) * parts, (bright[i]));
+            }
+
+            MainChart.Series.Add(s);
         }
     }
 }
