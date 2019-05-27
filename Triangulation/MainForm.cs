@@ -23,7 +23,9 @@ namespace Triangulation
     {
         private Mesh triangulated = null;
         private byte[,,] imageBits = null;
+        private byte[,,] finalBits = null;
         private Bitmap realImage = null;
+        private Bitmap finalImage = null;
         public MainForm()
         {
             InitializeComponent();
@@ -38,8 +40,12 @@ namespace Triangulation
             try
             {
                 MainImage.Image = Image.FromFile(OpenImg.FileName);
-                realImage = (Bitmap) MainImage.Image;
+                realImage = (Bitmap) MainImage.Image.Clone();
+                finalImage = (Bitmap)MainImage.Image.Clone();
                 imageBits = BitmapToByteRgbQ((Bitmap)MainImage.Image);
+
+                MainChart.Series.Clear();
+                FinalImage.Image = null;
             }
             catch
             {
@@ -55,7 +61,7 @@ namespace Triangulation
 
             try
             {
-                MainImage.Image.Save(SaveImg.FileName, ImageFormat.Png);
+                FinalImage.Image.Save(SaveImg.FileName, ImageFormat.Png);
 
             }
             catch
@@ -70,19 +76,30 @@ namespace Triangulation
             if (MainImage.Image == null)
                 return;
 
+           TD();
+        }
+
+
+        void TD()
+        {
+            if(!Triang.Checked)
+                return;
+
+            if((int)PartCount.Value == 1)
+                return;
+
             Polygon p = new Polygon();
 
             List<Vertex> corners;
-            if (MessageBox.Show("Использовать глубокий поиск границ?", "Хмъ", MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Asterisk) == DialogResult.Yes)
+            if (UserDeepSearch.Checked)
             {
                 MoravecCornersDetector scd = new MoravecCornersDetector();
-                corners = scd.ProcessImage((Bitmap)MainImage.Image).Select(x => new Vertex(x.X, x.Y)).ToList();
+                corners = scd.ProcessImage(finalImage).Select(x => new Vertex(x.X, x.Y)).ToList();
             }
             else
             {
                 SusanCornersDetector scd = new SusanCornersDetector();
-                corners = scd.ProcessImage((Bitmap)MainImage.Image).Select(x => new Vertex(x.X, x.Y)).ToList();
+                corners = scd.ProcessImage(finalImage).Select(x => new Vertex(x.X, x.Y)).ToList();
             }
 
             corners.ForEach(delegate (Vertex v)
@@ -93,7 +110,7 @@ namespace Triangulation
             triangulated = (Mesh)p.Triangulate();
 
 
-            using (Graphics graphics = Graphics.FromImage(MainImage.Image))
+            using (Graphics graphics = Graphics.FromImage(finalImage))
             {
                 foreach (Triangle t in triangulated.Triangles)
                 {
@@ -121,9 +138,7 @@ namespace Triangulation
                     graphics.FillPolygon(brush, points);
                 }
             }
-            MainImage.Invalidate();
         }
-
         public unsafe byte[,,] BitmapToByteRgbQ(Bitmap bmp)
         {
             int width = bmp.Width,
@@ -221,7 +236,18 @@ namespace Triangulation
             if (triangulated == null)
                 return;
 
-            using (Graphics graphics = Graphics.FromImage(MainImage.Image))
+            dp();
+        }
+
+        void dp()
+        {
+            if(!DrawPoly.Checked)
+                return;
+
+            if ((int)PartCount.Value == 1)
+                return;
+            
+            using (Graphics graphics = Graphics.FromImage(finalImage))
             {
                 foreach (Triangle t in triangulated.Triangles)
                 {
@@ -237,16 +263,13 @@ namespace Triangulation
                     Bresenham4Line(graphics, Color.Red, (int)points[2].X, (int)points[2].Y, (int)points[0].X, (int)points[0].Y);
                 }
             }
-            MainImage.Invalidate();
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        void cluster(ref Bitmap bitmap)
         {
+            if (!PreCluster.Checked)
+                return;
 
-        }
-
-        void cluster()
-        {
             int _k = (int)PartCount.Value;
 
             Bitmap image = realImage;
@@ -266,41 +289,48 @@ namespace Triangulation
             pixels.Apply((x, i) => kmeans.Clusters.Centroids[idx[i]], result: pixels);
 
             Bitmap result; arrayToImage.Convert(pixels, out result);
-
-            MainImage.Image = result;
-
+            bitmap =  result;
         }
         void gg()
         {
-            int parts = 255 / (int)PartCount.Value;
-            List<int> bright = new List<int>();
-            int allCount = 0;
-            bright.AddRange(new int[(int)PartCount.Value]);
-            for (int i = 0; i < imageBits.GetLength(2); i++)
-            for (int j = 0; j < imageBits.GetLength(1); j++)
+            if(!GraphASE.Checked)
+                return;
+
+            finalBits = BitmapToByteRgbQ(finalImage);
+            List<double> ase = new List<double>();
+            for (int i = 0; i < imageBits.GetLength(1); i++)
+            for (int j = 0; j < imageBits.GetLength(2); j++)
             {
-                int b = (imageBits[0, j, i] + imageBits[1, j, i] + imageBits[2, j, i]) / 3;
-                for (int k = 1; k <= (int)PartCount.Value; k++)
-                {
-                    if (b <= k * parts)
-                    {
-                        bright[k - 1]++;
-                        allCount++;
-                        break;
-                    }
+                double ss = (float)Math.Pow(
+                    (double)(finalBits[0, i, j] - imageBits[0, i, j] +
+                     finalBits[1, i, j] - imageBits[1, i, j] +
+                     finalBits[2, i, j] - imageBits[2, i, j]) / 9
+                    , 2);
+
+                ase.Add(Math.Sqrt(ss));
+
                 }
-            }
             MainChart.Series.Clear();
             Series s = new Series()
             {
                 ChartType = SeriesChartType.Column
             };
-            for (int i = 0; i < bright.Count; i++)
+            for (int i = 0; i < ase.Count; i++)
             {
-                s.Points.AddXY((i + 1) * parts, (bright[i]));
+                s.Points.AddXY(i, ase[i]);
             }
 
             MainChart.Series.Add(s);
+        }
+
+        private void Start_Click(object sender, EventArgs e)
+        {
+
+            cluster(ref finalImage);
+            TD();
+            dp();
+            gg();
+            FinalImage.Image = finalImage;
         }
     }
 }
